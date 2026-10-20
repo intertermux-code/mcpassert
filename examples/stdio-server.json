@@ -1,0 +1,5 @@
+{
+  "transport": "stdio",
+  "command": ["python3", "../tests/mock_stdio_server.py"],
+  "timeout": 30
+}
