@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcpassert"
-version = "0.1.0"
+version = "0.2.0"
 description = "Assertion harness for Model Context Protocol servers"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 license-files = ["LICENSE"]
-authors = [{ name = "Clawdyy" }]
+authors = [{ name = "AP", email = "intertermux@gmail.com" }]
 keywords = ["mcp", "model-context-protocol", "testing", "assertions", "ci"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -18,10 +18,9 @@ classifiers = [
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Testing",
 ]
 dependencies = []
@@ -35,7 +34,7 @@ mcpassert = "mcpassert.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/intertermux-code/mcpassert"
-Source = "https://github.com/intertermux-code/mcpassert"
+Repository = "https://github.com/intertermux-code/mcpassert"
 Issues = "https://github.com/intertermux-code/mcpassert/issues"
 
 [tool.setuptools.packages.find]

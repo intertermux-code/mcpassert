@@ -1,5 +1,8 @@
 # mcp-test
 
+[![PyPI](https://img.shields.io/pypi/v/mcpassert)](https://pypi.org/project/mcpassert/)
+[![Tests](https://github.com/intertermux-code/mcpassert/actions/workflows/test.yml/badge.svg)](https://github.com/intertermux-code/mcpassert/actions/workflows/test.yml)
+
 A terminal and CI harness for [Model Context Protocol](https://modelcontextprotocol.io)
 servers.
 
@@ -496,6 +499,45 @@ $ python3 -m unittest discover -s tests
 
 The suite runs against the mock servers in `tests/`, one speaking stdio and
 one speaking streamable HTTP, so it needs nothing but a Python interpreter.
+
+## Releasing
+
+A release is a tag. The `Publish` workflow builds the sdist and the wheel, runs
+`twine check` over both and uploads them to PyPI with OIDC trusted publishing,
+so no API token is stored anywhere.
+
+Trusted publishing has to be registered once, on the PyPI project page under
+*Publishing*:
+
+| field | value |
+| --- | --- |
+| Project name | `mcpassert` |
+| Owner | `intertermux-code` |
+| Repository name | `mcpassert` |
+| Workflow name | `Publish` |
+| Workflow file name | `publish.yml` |
+| Environment name | leave it empty |
+
+After that, bump the version in `pyproject.toml` and in
+`src/mcpassert/__init__.py` (a test fails if the two drift apart) and push the
+matching tag:
+
+```console
+$ git tag v0.2.0
+$ git push origin v0.2.0
+```
+
+The workflow stops when the tag does not name the version in `pyproject.toml`,
+and PyPI refuses a version it already has, so the bump comes before the tag and
+not after it. Running the build locally first is cheap insurance:
+
+```console
+$ python -m pip install --upgrade build twine
+$ python -m build && twine check dist/*
+```
+
+`workflow_dispatch` runs the same steps by hand, without a tag, and publishes
+whatever version `pyproject.toml` holds.
 
 ## License
 

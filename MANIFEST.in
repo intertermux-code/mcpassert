@@ -1,0 +1,9 @@
+include LICENSE
+include README.md
+
+recursive-include examples *.json
+
+prune tests
+prune .pytest_cache
+prune src/mcpassert.egg-info
+global-exclude *.py[cod]
