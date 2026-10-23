@@ -1,0 +1,173 @@
+{
+  "format": "mcpassert-fixture",
+  "interactions": [
+    {
+      "method": "initialize",
+      "params": {
+        "capabilities": {},
+        "clientInfo": {
+          "name": "mcp-test",
+          "version": "0.1.0"
+        },
+        "protocolVersion": "2025-06-18"
+      },
+      "response": {
+        "id": 1,
+        "jsonrpc": "2.0",
+        "result": {
+          "capabilities": {
+            "tools": {
+              "listChanged": false
+            }
+          },
+          "protocolVersion": "2025-06-18",
+          "serverInfo": {
+            "name": "mock-stdio-server",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "method": "tools/list",
+      "params": {},
+      "response": {
+        "id": 2,
+        "jsonrpc": "2.0",
+        "result": {
+          "tools": [
+            {
+              "description": "Return the arguments unchanged",
+              "inputSchema": {
+                "properties": {
+                  "a": {
+                    "type": "integer"
+                  },
+                  "b": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "name": "echo"
+            },
+            {
+              "description": "Add two numbers",
+              "inputSchema": {
+                "properties": {
+                  "a": {
+                    "type": "number"
+                  },
+                  "b": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "a",
+                  "b"
+                ],
+                "type": "object"
+              },
+              "name": "add"
+            },
+            {
+              "description": "Fail with a tool level error",
+              "inputSchema": {
+                "properties": {},
+                "type": "object"
+              },
+              "name": "fail"
+            },
+            {
+              "description": "Answer with a JSON-RPC error",
+              "inputSchema": {
+                "properties": {},
+                "type": "object"
+              },
+              "name": "boom"
+            },
+            {
+              "description": "Wait for a while before answering",
+              "inputSchema": {
+                "properties": {
+                  "seconds": {
+                    "type": "number"
+                  }
+                },
+                "type": "object"
+              },
+              "name": "sleep"
+            },
+            {
+              "description": "Return a value that changes on every call",
+              "inputSchema": {
+                "properties": {},
+                "type": "object"
+              },
+              "name": "stamp"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "a": 1
+        },
+        "name": "echo"
+      },
+      "response": {
+        "id": 2,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "{\"a\": 1}",
+              "type": "text"
+            }
+          ],
+          "isError": false,
+          "structuredContent": {
+            "a": 1
+          }
+        }
+      }
+    },
+    {
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "a": 2,
+          "b": 3
+        },
+        "name": "add"
+      },
+      "response": {
+        "id": 2,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "5",
+              "type": "text"
+            }
+          ],
+          "isError": false,
+          "structuredContent": {
+            "sum": 5
+          }
+        }
+      }
+    }
+  ],
+  "protocolVersion": "2025-06-18",
+  "server": "examples/stdio-server.json",
+  "serverInfo": {
+    "name": "mock-stdio-server",
+    "version": "1.0.0"
+  },
+  "transport": "stdio",
+  "version": 1
+}

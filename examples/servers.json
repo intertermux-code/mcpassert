@@ -1,0 +1,6 @@
+{
+  "servers": [
+    { "name": "stdio", "descriptor": "stdio-server.json" },
+    { "name": "recorded", "fixture": "mock-session.json" }
+  ]
+}

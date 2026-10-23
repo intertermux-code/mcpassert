@@ -5,8 +5,11 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
+import os
 import sys
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 from . import __version__, snapshot
 from .descriptor import ServerDescriptor
@@ -20,6 +23,7 @@ from .errors import (
     UsageError,
 )
 from .expectations import Expectation, evaluate_all, parse_expectations
+from .fixtures import Fixture, FixtureTransport, RecordingTransport
 from .mcpclient import McpClient
 from .snapshot import DEFAULT_DIRECTORY
 from .transports import build_transport
@@ -34,14 +38,49 @@ Runs a server, calls it and checks the answer with small expressions:
 
   mcp-test list server.json
   mcp-test call server.json echo --args '{"a": 1}' --expect 'result.a == 1'
+
+Records an answer once and replays it later without the server running:
+
+  mcp-test call server.json echo --args '{"a": 1}' --record echo.json
+  mcp-test call --fixture echo.json echo --args '{"a": 1}' --expect 'result.a == 1'
+
+Checks several servers in one run:
+
+  mcp-test list server.json other.json
+  mcp-test list --servers servers.json
 """
 
 EPILOG = """\
 exit codes:
   0  every check passed
   1  an assertion or a snapshot did not match
-  2  the command could not run (bad descriptor, no connection, protocol error)
+  2  the command could not run (bad descriptor, no connection, protocol error,
+     fixture that holds nothing for the call)
 """
+
+
+@dataclass
+class Target:
+    """One server, or the recording of one, that the checks run against."""
+
+    label: str
+    descriptor: Optional[str] = None
+    fixture: Optional[str] = None
+
+
+def _add_server_arguments(parser: argparse.ArgumentParser) -> None:
+    """Accept either a list of descriptors or the path of a recorded session."""
+    parser.add_argument(
+        "server_paths",
+        nargs="*",
+        metavar="SERVER",
+        help="path to a server descriptor, repeatable to check several servers",
+    )
+    parser.add_argument(
+        "--servers",
+        metavar="FILE",
+        help="JSON file listing the servers to check",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -82,6 +121,22 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="rewrite the snapshot file instead of comparing against it",
     )
+    common.add_argument(
+        "--record",
+        metavar="PATH",
+        help="write the exchanges of this run to a fixture file",
+    )
+    common.add_argument(
+        "--append",
+        action="store_true",
+        help="with --record: add to the fixture file instead of replacing it",
+    )
+    common.add_argument(
+        "--fixture",
+        metavar="PATH",
+        help="replay a recorded session from a fixture file instead of "
+        "connecting to a server",
+    )
 
     parser = argparse.ArgumentParser(
         prog=PROGRAM,
@@ -97,10 +152,10 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser = subparsers.add_parser(
         "list",
         parents=[common],
-        help="list the tools of a server",
-        description="Connect to a server and list the tools it exposes.",
+        help="list the tools of one or more servers",
+        description="Connect to one or more servers and list the tools they expose.",
     )
-    list_parser.add_argument("server", help="path to the server descriptor")
+    _add_server_arguments(list_parser)
     list_parser.add_argument(
         "--expect",
         action="append",
@@ -132,9 +187,9 @@ def build_parser() -> argparse.ArgumentParser:
         "call",
         parents=[common],
         help="call a tool and check the answer",
-        description="Connect to a server, call a tool and check the answer.",
+        description="Connect to one or more servers, call a tool and check the answer.",
     )
-    call_parser.add_argument("server", help="path to the server descriptor")
+    _add_server_arguments(call_parser)
     call_parser.add_argument("tool", help="name of the tool to call")
     call_parser.add_argument(
         "--args",
@@ -189,12 +244,41 @@ def run(args: argparse.Namespace) -> int:
         raise UsageError("no command given, try 'mcp-test --help'")
     if args.update and not args.snapshot:
         raise UsageError("--update only makes sense together with --snapshot")
+    if args.record and args.fixture:
+        raise UsageError(
+            "--record writes a fixture and --fixture replays one, give only one of them"
+        )
+    if args.append and not args.record:
+        raise UsageError("--append only makes sense together with --record")
 
-    descriptor = ServerDescriptor.from_file(args.server)
-    if args.timeout is not None:
-        descriptor.timeout = args.timeout
+    targets = _targets(args)
+    if args.record and len(targets) > 1:
+        raise UsageError("--record captures the session of one server, give one server")
+    if len(targets) == 1:
+        return _execute(args, targets[0])
+    return _execute_each(args, targets)
 
-    transport = build_transport(descriptor, verbose=args.verbose)
+
+def _execute(args: argparse.Namespace, target: Target) -> int:
+    """Run one server (or one recording) through the checks of the command."""
+    recording: Optional[Fixture] = None
+    already = 0
+    if target.fixture:
+        transport = FixtureTransport(
+            Fixture.from_file(target.fixture), verbose=args.verbose
+        )
+    else:
+        descriptor = ServerDescriptor.from_file(target.descriptor)
+        if args.timeout is not None:
+            descriptor.timeout = args.timeout
+        transport = build_transport(descriptor, verbose=args.verbose)
+        if args.record:
+            recording = _open_recording(args)
+            already = len(recording.interactions)
+            recording.transport = descriptor.transport
+            recording.server = target.descriptor
+            transport = RecordingTransport(transport, recording, verbose=args.verbose)
+
     client = McpClient(transport, client_version=__version__)
     try:
         client.initialize()
@@ -203,6 +287,152 @@ def run(args: argparse.Namespace) -> int:
         return _run_call(args, client)
     finally:
         client.close()
+        if recording is not None:
+            _write_recording(args, recording, len(recording.interactions) - already)
+
+
+def _write_recording(args: argparse.Namespace, recording: Fixture, new: int) -> None:
+    if not new:
+        # A server that never answered has nothing worth keeping, and an empty
+        # file would only hide the failure from the next run.
+        return
+    recording.write(args.record)
+    if not args.quiet:
+        print(
+            "{0}: wrote fixture {1} ({2} interaction(s))".format(
+                PROGRAM, args.record, len(recording.interactions)
+            ),
+            file=sys.stderr,
+        )
+
+
+def _open_recording(args: argparse.Namespace) -> Fixture:
+    if args.append and os.path.exists(args.record):
+        return Fixture.from_file(args.record)
+    return Fixture()
+
+
+# -- servers of one run ---------------------------------------------------
+
+
+def _targets(args: argparse.Namespace) -> List[Target]:
+    """Every server this invocation was pointed at."""
+    if args.fixture:
+        if args.server_paths:
+            raise UsageError(
+                "--fixture replays a recorded session instead of connecting to a "
+                "server, so there is no descriptor to give"
+            )
+        return [Target(label=args.fixture, fixture=args.fixture)]
+
+    servers = [Target(label=path, descriptor=path) for path in args.server_paths]
+    if args.servers:
+        servers.extend(_read_server_list(args.servers))
+    if not servers:
+        raise UsageError(
+            "no server given: pass a descriptor, --servers FILE or --fixture FILE"
+        )
+    return servers
+
+
+def _read_server_list(path: str) -> List[Target]:
+    """Read a servers file: a list of descriptors, optionally with a name each."""
+    file_path = Path(path)
+    try:
+        raw = file_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise UsageError("servers file not found: {0}".format(path))
+    except OSError as exc:
+        raise UsageError("could not read servers file {0}: {1}".format(path, exc))
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        raise UsageError("servers file {0} is not valid JSON: {1}".format(path, exc))
+
+    entries = data.get("servers") if isinstance(data, dict) else data
+    if not isinstance(entries, list) or not entries:
+        raise UsageError(
+            "servers file {0} must hold a non-empty list of servers".format(path)
+        )
+    return [_read_server_entry(entry, file_path.parent) for entry in entries]
+
+
+def _read_server_entry(entry: Any, base: Path) -> Target:
+    if isinstance(entry, str):
+        return Target(label=entry, descriptor=str(base / entry))
+    if not isinstance(entry, dict):
+        raise UsageError(
+            "a server of the list must be a path or an object, got {0}".format(
+                type(entry).__name__
+            )
+        )
+    kinds = [kind for kind in ("descriptor", "fixture") if entry.get(kind)]
+    if not kinds:
+        raise UsageError(
+            "a server of the list needs a 'descriptor' or a 'fixture' field: {0}".format(
+                json.dumps(entry, sort_keys=True, ensure_ascii=False)
+            )
+        )
+    if len(kinds) > 1:
+        raise UsageError(
+            "a server of the list is either a descriptor or a fixture, not both"
+        )
+    kind = kinds[0]
+    given = entry[kind]
+    if not isinstance(given, str):
+        raise UsageError("field {0!r} of a server must be a path".format(kind))
+    name = entry.get("name")
+    label = name if isinstance(name, str) and name else given
+    return Target(label=label, **{kind: str(base / given)})
+
+
+def _execute_each(args: argparse.Namespace, targets: List[Target]) -> int:
+    """Check every server in turn and report them together."""
+    results = []
+    for target in targets:
+        if not args.quiet:
+            print("{0}: {1}".format(PROGRAM, target.label), file=sys.stderr)
+        try:
+            code = _execute(args, target)
+        except McpTestError as exc:
+            print("{0}: error: {1}".format(PROGRAM, exc), file=sys.stderr)
+            if exc.details:
+                print(exc.details, file=sys.stderr)
+            code = exc.exit_code
+        results.append((target.label, code))
+    return _summarize(results)
+
+
+def _summarize(results: List[Tuple[str, int]]) -> int:
+    width = max(len(label) for label, _ in results)
+    print("{0}: summary".format(PROGRAM), file=sys.stderr)
+    failed = 0
+    for label, code in results:
+        if code != EXIT_SUCCESS:
+            failed += 1
+        print(
+            "  {0}  {1}".format(label.ljust(width), _status(code)),
+            file=sys.stderr,
+        )
+    if failed:
+        print(
+            "{0}: {1} of {2} server(s) failed".format(PROGRAM, failed, len(results)),
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "{0}: all {1} server(s) passed".format(PROGRAM, len(results)),
+            file=sys.stderr,
+        )
+    return max(code for _, code in results)
+
+
+def _status(code: int) -> str:
+    if code == EXIT_SUCCESS:
+        return "PASS"
+    if code == EXIT_ASSERTION:
+        return "FAIL"
+    return "ERROR"
 
 
 # -- commands ------------------------------------------------------------

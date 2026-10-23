@@ -53,6 +53,11 @@ class ServerDescriptor:
                     _type_name(data)
                 )
             )
+        if "servers" in data and "transport" not in data:
+            raise DescriptorError(
+                "{0} lists several servers, it is not a descriptor; pass it with "
+                "--servers".format(source or "file")
+            )
 
         transport = _read_transport(data)
         timeout = _read_timeout(data)

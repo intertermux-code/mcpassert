@@ -18,6 +18,8 @@ PASS  result.a == 1
 * stdio and streamable HTTP transports
 * a small assertion language instead of a test framework
 * golden files for whole responses
+* recorded sessions that replay without the server running
+* several servers checked by one command
 
 ## Install
 
@@ -94,6 +96,14 @@ FAILED: result.a == 2
 mcp-test: 1 check(s) failed
 ```
 
+The repository also ships a recording of that server and a file naming two
+servers, so replaying and checking several at once can be tried the same way:
+
+```console
+$ mcp-test call --fixture examples/mock-session.json add --args '{"a": 2, "b": 3}' --expect 'result.sum == 5'
+$ mcp-test list --servers examples/servers.json
+```
+
 ## The server descriptor
 
 A descriptor is a JSON file that says how to reach a server.
@@ -145,9 +155,9 @@ such as `python3` is still looked up in `PATH`.
 
 ## Commands
 
-### `mcp-test list <server.json>`
+### `mcp-test list [SERVER ...]`
 
-Connects to the server and lists its tools.
+Connects to one or more servers and lists their tools.
 
 | flag | meaning |
 | --- | --- |
@@ -157,9 +167,9 @@ Connects to the server and lists its tools.
 | `--include-prompts` | also list the prompts of the server |
 | `--json` | print the raw response document instead of a readable list |
 
-### `mcp-test call <server.json> <tool>`
+### `mcp-test call [SERVER ...] <tool>`
 
-Calls a tool and prints the answer as JSON.
+Calls a tool on one or more servers and prints the answer as JSON.
 
 | flag | meaning |
 | --- | --- |
@@ -172,8 +182,22 @@ Calls a tool and prints the answer as JSON.
 | `--validate-schema` | check the arguments against the `inputSchema` of the tool |
 | `--validate-output` | check the output against the `outputSchema` of the tool |
 
-Both commands also accept `--timeout SECONDS`, `--verbose` (trace the JSON-RPC
-traffic on stderr) and `--quiet` (only report failures).
+Both commands take `--timeout SECONDS`, `--verbose` (trace the JSON-RPC
+traffic on stderr) and `--quiet` (only report failures), and the three flags
+that decide where the answer comes from:
+
+| flag | meaning |
+| --- | --- |
+| `--record PATH` | write the exchanges of this run into a fixture file |
+| `--append` | with `--record`: add to the file instead of replacing it |
+| `--fixture PATH` | replay a recorded session instead of connecting to a server |
+| `--servers FILE` | check every server the JSON file lists |
+
+Give `--fixture` and `--servers` before the names, not between them:
+`mcp-test call --servers suite.json echo` is right, and so is
+`mcp-test call live.json recorded.json echo`, while
+`mcp-test call live.json --servers suite.json echo` leaves the tool name
+stranded behind the flag.
 
 ## The assertion language
 
@@ -255,13 +279,149 @@ $ mcp-test call examples/stdio-server.json stamp --snapshot stamp --ignore-paths
 $ mcp-test call examples/stdio-server.json stamp --snapshot stamp --ignore-paths result.structuredContent.now
 ```
 
+## Recorded sessions
+
+A live server is not always around when the checks have to run: it may need a
+token, a database, or thirty seconds of start up. `--record` writes what the
+server answered into a JSON file and `--fixture` hands those answers back
+later, without starting anything. The answer printed on stdout is left out
+below; it is the same document in both runs.
+
+```console
+$ mcp-test call examples/stdio-server.json echo --args '{"a": 1}' --record fixtures/echo.json
+mcp-test: wrote fixture fixtures/echo.json (2 interaction(s))
+$ mcp-test call --fixture fixtures/echo.json echo --args '{"a": 1}' --expect 'result.a == 1'
+PASS  result.a == 1
+```
+
+The repository ships one of these recordings, `examples/mock-session.json`,
+made from the mock server with three commands.
+
+Recording is a normal run with a flag on top, so `list` and `call` keep every
+other flag: `--record` a `list` to capture the tools, `--record` a `call` with
+`--validate-schema` to capture both. `--append` adds this run's exchanges to a
+file that already holds some, which is how a fixture for a whole session is
+built up one command at a time.
+
+The file is plain JSON and is meant to be committed:
+
+```json
+{
+  "format": "mcpassert-fixture",
+  "version": 1,
+  "transport": "stdio",
+  "server": "examples/stdio-server.json",
+  "serverInfo": {"name": "mock-stdio-server", "version": "1.0.0"},
+  "protocolVersion": "2025-06-18",
+  "interactions": [
+    {
+      "method": "tools/call",
+      "params": {"name": "echo", "arguments": {"a": 1}},
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "result": {
+          "content": [{"type": "text", "text": "{\"a\": 1}"}],
+          "isError": false,
+          "structuredContent": {"a": 1}
+        }
+      }
+    }
+  ]
+}
+```
+
+`interactions` holds the requests worth replaying and what the server answered
+to each; everything else a session does is dropped. How a replay is matched
+against them:
+
+* A request is answered from the recording made with the same method and the
+  same arguments. Asking the fixture for something it never saw is a run that
+  could not happen, so it exits with 2 and lists what the file does hold:
+
+  ```console
+  $ mcp-test call --fixture fixtures/echo.json echo --args '{"a": 2}'
+  mcp-test: error: the fixture fixtures/echo.json holds no answer for call 'echo' with {"a": 2}
+  recorded in the fixture:
+    initialize
+    call 'echo' with {"a": 1}
+  ```
+
+* Several answers to the same request are handed out in the order they were
+  recorded, which is what a tool that changes between calls looks like. Once
+  they are used up, the last one is repeated.
+* The `initialize` handshake is matched on its method alone, so a recording
+  keeps working when the client or the negotiated protocol version changes.
+* `--expect`, `--snapshot` and `--quiet` behave exactly as they do against a
+  live server: a recording is just another transport.
+
+A recording holds the arguments of every call it captured, so keep secrets out
+of the arguments you record. The descriptor is never written into the file, not
+even its `env` and `headers`.
+
+## Several servers in one run
+
+Give more than one server, or name them in a file:
+
+```console
+$ mcp-test list examples/stdio-server.json other-server.json
+$ mcp-test list --servers examples/servers.json
+```
+
+A servers file lists the servers, each of them a path or an object with a
+name. A recording can be one of them too, so a live server and its own fixture
+can be checked in the same run:
+
+```json
+{
+  "servers": [
+    { "name": "stdio", "descriptor": "stdio-server.json" },
+    { "name": "recorded", "fixture": "mock-session.json" }
+  ]
+}
+```
+
+Relative paths point at the servers file, the same way they point at the
+descriptor. Every server is checked in turn, its answer goes to stdout as
+usual (left out of the transcripts below), and the run ends with a combined
+report on stderr:
+
+```console
+$ mcp-test call --servers examples/servers.json add --args '{"a": 2, "b": 3}' --expect 'result.sum == 5'
+mcp-test: stdio
+PASS  result.sum == 5
+mcp-test: recorded
+PASS  result.sum == 5
+mcp-test: summary
+  stdio     PASS
+  recorded  PASS
+mcp-test: all 2 server(s) passed
+```
+
+A server that cannot run does not stop the others; it is reported as `ERROR`:
+
+```console
+$ mcp-test list examples/stdio-server.json no-such-server.json
+mcp-test: examples/stdio-server.json
+mcp-test: no-such-server.json
+mcp-test: error: server descriptor not found: no-such-server.json
+mcp-test: summary
+  examples/stdio-server.json  PASS
+  no-such-server.json         ERROR
+mcp-test: 1 of 2 server(s) failed
+```
+
+The exit code is the worst of the run, so a single `ERROR` (2) outranks a check
+that did not match (1), which outranks a pass (0). A run with one server reports
+exactly as it always did, with no summary and no extra lines.
+
 ## Exit codes
 
 | code | meaning |
 | --- | --- |
 | 0 | every check passed |
 | 1 | an assertion or a golden file did not match |
-| 2 | the command could not run: broken descriptor, no connection, protocol error, malformed arguments |
+| 2 | the command could not run: broken descriptor, no connection, protocol error, malformed arguments, nothing recorded for this call |
 
 A tool call that answers with a JSON-RPC error or reports `isError` counts as
 a failed call, so it exits with 2. Assert on it to make it a passing test:
@@ -269,6 +429,9 @@ a failed call, so it exits with 2. Assert on it to make it a passing test:
 ```console
 $ mcp-test call examples/stdio-server.json boom --expect 'error.code == -32000'
 ```
+
+A run over several servers exits with the worst result of any of them, so one
+server that did not match is enough to fail the pipeline.
 
 ## Use in CI
 
@@ -289,6 +452,22 @@ jobs:
       - run: mcp-test list server.json --expect 'result.tools.*.name contains "search"'
 ```
 
+When the server needs credentials the pipeline does not have, record the
+answers from a machine that does and commit the fixture. The checks then run
+anywhere:
+
+```yaml
+      - run: mcp-test call --fixture fixtures/search.json search --args '{"q": "mcp"}' --expect 'result.total != 0'
+      - run: mcp-test list --fixture fixtures/tools.json --expect 'result.tools.*.name contains "search"'
+```
+
+Several servers can be checked by one step, and the step fails if any of them
+does:
+
+```yaml
+      - run: mcp-test list --servers ci/servers.json
+```
+
 ## Limitations
 
 * The old SSE transport, where the server opens an event stream on `GET` and
@@ -300,8 +479,11 @@ jobs:
 * There is no support for OAuth, for server initiated requests such as
   `roots/list` or `sampling/createMessage`, or for elicitation. Requests
   from the server are answered with "method not found".
-* One server per run. There is no support yet for fixtures, setup and teardown
-  scripts, or for several servers talking to each other.
+* A recording replays requests and answers. Notifications, server initiated
+  requests and streams of progress messages are not kept, and a fixture only
+  answers calls whose arguments match what was recorded.
+* Servers are checked one after the other; there is no support yet for setup
+  and teardown scripts or for servers that talk to each other.
 * The transport speaks one version of the protocol, `2025-06-18`.
 
 ## Development

@@ -43,6 +43,67 @@ def write_json(path, payload):
     return str(path)
 
 
+def response(result, message_id=1, error=None):
+    """A JSON-RPC answer as it is stored in a fixture."""
+    message = {"jsonrpc": "2.0", "id": message_id}
+    if error is not None:
+        message["error"] = error
+    else:
+        message["result"] = result
+    return message
+
+
+def fixture_payload(interactions):
+    """A fixture holding ``interactions`` plus the handshake every session starts with."""
+    initialize = {
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "mcp-test", "version": "0.1.0"},
+        },
+        "response": response(
+            {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {"tools": {"listChanged": False}},
+                "serverInfo": {"name": "fixture-server", "version": "1.0.0"},
+            }
+        ),
+    }
+    recorded = [initialize]
+    for index, item in enumerate(interactions, start=2):
+        recorded.append(
+            {
+                "method": item["method"],
+                "params": item.get("params") or {},
+                "response": item["response"],
+            }
+        )
+    return {
+        "format": "mcpassert-fixture",
+        "version": 1,
+        "protocolVersion": "2025-06-18",
+        "serverInfo": {"name": "fixture-server", "version": "1.0.0"},
+        "interactions": recorded,
+    }
+
+
+def summary_lines(stderr):
+    """The per-server results of a combined report, as (label, status) pairs."""
+    lines = stderr.splitlines()
+    try:
+        start = lines.index("mcp-test: summary") + 1
+    except ValueError:
+        return []
+    results = []
+    for line in lines[start:]:
+        if not line.startswith("  "):
+            break
+        parts = line.split()
+        results.append((" ".join(parts[:-1]), parts[-1]))
+    return results
+
+
 def run_cli(argv):
     """Run the command line in process and capture what it writes.
 

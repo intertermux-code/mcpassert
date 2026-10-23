@@ -40,6 +40,10 @@ class ProtocolError(McpTestError):
     """The server answered with something that is not valid MCP."""
 
 
+class FixtureError(McpTestError):
+    """A recorded session cannot be replayed: broken file, or nothing recorded."""
+
+
 class UsageError(McpTestError):
     """The command line itself does not make sense."""
 
