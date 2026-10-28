@@ -186,8 +186,10 @@ Calls a tool on one or more servers and prints the answer as JSON.
 | `--validate-output` | check the output against the `outputSchema` of the tool |
 
 Both commands take `--timeout SECONDS`, `--verbose` (trace the JSON-RPC
-traffic on stderr) and `--quiet` (only report failures), and the three flags
-that decide where the answer comes from:
+traffic on stderr), `--quiet` (only report failures) and the golden file flags
+of the `call` table above (`--snapshot-dir`, `--ignore-paths`, `--update`).
+Three ways decide where the answer comes from; `--append` is not a fourth one,
+it only modifies `--record`:
 
 | flag | meaning |
 | --- | --- |
