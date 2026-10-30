@@ -323,6 +323,11 @@ def _targets(args: argparse.Namespace) -> List[Target]:
                 "--fixture replays a recorded session instead of connecting to a "
                 "server, so there is no descriptor to give"
             )
+        if args.servers:
+            raise UsageError(
+                "--fixture replays one recorded session, so it cannot name a list "
+                "of servers; put the fixture in the servers file instead"
+            )
         return [Target(label=args.fixture, fixture=args.fixture)]
 
     servers = [Target(label=path, descriptor=path) for path in args.server_paths]

@@ -198,6 +198,12 @@ it only modifies `--record`:
 | `--fixture PATH` | replay a recorded session instead of connecting to a server |
 | `--servers FILE` | check every server the JSON file lists |
 
+`--fixture` names one recording and no server, so it is refused together with
+`--servers`; a run that silently checked the recording alone would look like a
+run that passed on every server. To replay a recording alongside live servers,
+list it in the servers file with a `fixture` field, as shown under "Several
+servers in one run".
+
 Give `--fixture` and `--servers` before the names, not between them:
 `mcp-test call --servers suite.json echo` is right, and so is
 `mcp-test call live.json recorded.json echo`, while

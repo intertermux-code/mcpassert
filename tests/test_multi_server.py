@@ -301,5 +301,73 @@ class ServersFileTests(unittest.TestCase):
         self.assertIn("not both", err)
 
 
+class FixtureWithServersFileTests(unittest.TestCase):
+    """`--fixture` replays one recording, so it cannot carry a list of servers."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = self.directory.name
+        self.descriptor = write_json(
+            os.path.join(self.root, "first.json"), stdio_descriptor()
+        )
+        self.fixture = write_json(
+            os.path.join(self.root, "session.json"), fixture_payload([ECHO_CALL])
+        )
+        self.servers = write_json(
+            os.path.join(self.root, "servers.json"), {"servers": [self.descriptor]}
+        )
+
+    def test_list_refuses_a_fixture_together_with_servers(self):
+        code, out, err = run_cli(
+            ["list", "--fixture", self.fixture, "--servers", self.servers]
+        )
+        self.assertEqual(code, EXIT_SETUP, err)
+        self.assertIn("--fixture", err)
+        self.assertIn("servers file", err)
+        self.assertEqual(out, "")
+
+    def test_call_refuses_a_fixture_together_with_servers(self):
+        code, out, err = run_cli(
+            [
+                "call",
+                "--fixture",
+                self.fixture,
+                "--servers",
+                self.servers,
+                "echo",
+                "--args", '{"a": 1}',
+            ]
+        )
+        self.assertEqual(code, EXIT_SETUP, err)
+        self.assertIn("servers file", err)
+        self.assertEqual(out, "")
+
+    def test_a_fixture_still_replays_on_its_own(self):
+        code, out, err = run_cli(
+            [
+                "call",
+                "--fixture",
+                self.fixture,
+                "echo",
+                "--args", '{"a": 1}',
+                "--expect",
+                "result.a == 1",
+            ]
+        )
+        self.assertEqual(code, EXIT_SUCCESS, err)
+
+    def test_a_servers_file_still_checks_every_server(self):
+        second = write_json(os.path.join(self.root, "second.json"), stdio_descriptor())
+        servers = write_json(
+            os.path.join(self.root, "two.json"),
+            {"servers": [{"name": "alpha", "descriptor": self.descriptor},
+                         {"name": "beta", "descriptor": second}]},
+        )
+        code, out, err = run_cli(["list", "--servers", servers])
+        self.assertEqual(code, EXIT_SUCCESS, err)
+        self.assertEqual(summary_lines(err), [("alpha", "PASS"), ("beta", "PASS")])
+
+
 if __name__ == "__main__":
     unittest.main()
