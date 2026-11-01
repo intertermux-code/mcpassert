@@ -20,6 +20,7 @@ from .errors import (
     EXIT_SUCCESS,
     CheckFailed,
     McpTestError,
+    ProtocolError,
     UsageError,
 )
 from .expectations import Expectation, evaluate_all, parse_expectations
@@ -464,13 +465,21 @@ def _run_list(args: argparse.Namespace, client: McpClient) -> int:
 
 
 def _optional_list(client: McpClient, kind: str) -> List[Dict[str, Any]]:
-    """List a primitive, tolerating servers that do not implement it."""
+    """List an optional primitive.
+
+    A server that does not implement the primitive answers with a JSON-RPC
+    "method not found" error; that case is tolerated and reported as an empty
+    list. Every other error propagates.
+    """
     try:
         if kind == "resources":
             return client.list_resources()
         return client.list_prompts()
-    except McpTestError:
-        return []
+    except ProtocolError as exc:
+        message = str(exc).lower()
+        if "32601" in message or "method not found" in message:
+            return []
+        raise
 
 
 def _run_call(args: argparse.Namespace, client: McpClient) -> int:

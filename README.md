@@ -166,7 +166,7 @@ Connects to one or more servers and lists their tools.
 | --- | --- |
 | `--expect EXPR` | assertion to run against the answer, repeatable |
 | `--snapshot NAME` | compare the answer with a golden file |
-| `--include-resources` | also list the resources of the server |
+| `--include-resources` | also list the resources of the server (errors propagate instead of being masked as an empty list) |
 | `--include-prompts` | also list the prompts of the server |
 | `--json` | print the raw response document instead of a readable list |
 
@@ -222,6 +222,8 @@ error exists
 ```
 
 Several `--expect` flags can be given; all of them have to pass.
+
+An `--expect` expression must not have an empty right-hand side (e.g. `result.x !=`); such an expression is rejected with a usage error (exit 2) rather than being treated as `!= null`.
 
 ### Paths
 

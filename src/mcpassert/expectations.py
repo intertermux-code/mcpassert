@@ -112,6 +112,10 @@ def parse_expectation(text: str) -> Expectation:
     path = match.group("path")
     operator = match.group("operator")
     value, has_value = _parse_value(match.group("value"))
+    if operator != "exists" and not has_value:
+        raise UsageError(
+            "an --expect expression must not have an empty value: {0!r}".format(text)
+        )
     return Expectation(
         source=text,
         path=path,

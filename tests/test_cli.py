@@ -420,3 +420,37 @@ class EntryPointTests(CliTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+from mcpassert.cli import _optional_list
+from mcpassert.errors import ProtocolError, TransportError
+
+
+class OptionalListTests(unittest.TestCase):
+    def test_genuine_error_propagates(self):
+        class FakeClient:
+            def list_resources(self):
+                raise TransportError("boom")
+            def list_prompts(self):
+                return []
+
+        with self.assertRaises(TransportError):
+            _optional_list(FakeClient(), "resources")
+
+    def test_method_not_found_still_empty(self):
+        class FakeClient:
+            def list_resources(self):
+                raise ProtocolError("server returned an error for 'resources/list': [-32601] method not found")
+            def list_prompts(self):
+                return []
+
+        self.assertEqual(_optional_list(FakeClient(), "resources"), [])
+
+    def test_genuinely_empty_list_succeeds(self):
+        class FakeClient:
+            def list_resources(self):
+                return []
+            def list_prompts(self):
+                return []
+
+        self.assertEqual(_optional_list(FakeClient(), "resources"), [])

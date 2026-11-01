@@ -175,3 +175,26 @@ class ReportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EmptyExpectValueTests(unittest.TestCase):
+    def test_empty_right_hand_side_rejected_for_equality(self):
+        with self.assertRaises(UsageError):
+            parse_expectation("result.name == ")
+
+    def test_empty_right_hand_side_rejected_for_inequality(self):
+        with self.assertRaises(UsageError):
+            parse_expectation("result.name != ")
+
+    def test_empty_right_hand_side_rejected_for_contains(self):
+        with self.assertRaises(UsageError):
+            parse_expectation("result.items contains ")
+
+    def test_exists_without_value_still_accepted(self):
+        expectation = parse_expectation("result.name exists")
+        self.assertFalse(expectation.has_value)
+
+    def test_explicit_null_inequality_still_works(self):
+        expectation = parse_expectation("result.empty != null")
+        self.assertTrue(expectation.has_value)
+        self.assertIsNone(expectation.value)
